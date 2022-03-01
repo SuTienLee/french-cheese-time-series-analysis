@@ -1,0 +1,147 @@
+### Problem 1
+# FrenchCheese.csv captures monthly sales of 2 types of French Cheeses for 1980-1994. The unit is kilogram. 
+# As a consulting team, you are hired to analyze the data and obtain short term forecasts for this product and this task will be repeated every month. 
+
+## Plot the time series of two types of french cheeses: Brie and Comte
+library(forecast)
+FrenchCheese.data <- read.csv('FrenchCheese.csv')
+View(FrenchCheese.data)
+par(mar=c(4,4,4,4))
+brie.ts <- ts(FrenchCheese.data$Brie, start = c(1980,1), end = c(1994,12), freq = 12)
+plot(brie.ts, main = 'Brie monthly sales', xlab = 'Year', ylab = 'Sales(in Kilograms)')
+# Brie: Seems to have a downwards trend
+
+comte.ts <- ts(FrenchCheese.data$Comte, start = c(1980,1), end = c(1994,12), freq = 12)
+plot(comte.ts, main = 'Comte monthly sales', xlab = 'Year', ylab = 'Sales(in Kilograms)')
+# Comte: Seems to have an upwards trend
+
+## Plot the decomposition models of two
+plot(decompose(brie.ts, type = 'multiplicative'))
+plot(decompose(comte.ts, type = 'multiplicative'))
+
+## 1.b.c)
+ggAcf(brie.ts, lag.max=48, main='Brie ACF')
+ggAcf(comte.ts, lag.max=48, main='Comte ACF')
+
+brie.tslm <- tslm(brie.ts ~ trend + season)
+summary(brie.tslm)
+
+plot(brie.tslm$residuals, main='Brie Decomposition residuals')
+acf(brie.tslm$residuals, main='Brie Decomposition residuals ACF')
+pacf(brie.tslm$residuals, main='Brie Decomposition residuals PACF')
+
+comte.tslm <- tslm(comte.ts ~ trend + season)
+summary(comte.tslm)
+
+plot(comte.tslm$residuals, main = 'Comte Decomposition residuals')
+acf(comte.tslm$residuals, main='Comte Decomposition residuals ACF')
+pacf(comte.tslm$residuals, main='Comte Decomposition residuals PACF')
+
+## Brie sales: Produce as accurate as possible forecasts for the next 6 months
+# Parition data
+train.ts <- window(brie.ts, start = c(1980,1), end = c(1993, 12))  
+valid.ts <- window(brie.ts, start = c(1994,1), end = c(1994,12))
+
+
+## Build 4 training models with an appropriate season length: 
+## A) decomposition with linear trend; B) ARIMA; C) Auto ARIMA, D) Holt-Winter's exponential smoothing
+# A. Decomposition
+train.tslm <- tslm(train.ts ~ trend + season)
+valid.pred <- forecast(train.tslm, h = 12, level = 0)
+plot(valid.pred, main = 'Brie Decomposition', xlab = 'Year', ylab = 'Sales(in Kilograms)')
+lines(train.tslm$fitted, col = 2)
+lines(valid.ts, lty = 2)
+lines(valid.pred$trend)
+
+## B. ARIMA
+# Figure out lag 1 or lag 12 differencing
+train.ts %>% plot()
+train.ts %>% diff() %>% plot(main='lag-1 Differencing') #d=1, D=0
+train.ts %>% diff(lag=12) %>% plot(main='lag-12 Differencing') #d=0, D=1
+train.ts %>% diff() %>% diff(lag=12) %>% plot(main='lag-1 and -12 Differencing') #d=1, D=1
+
+# Draw ACF model with d=1, D=1
+train.ts %>% diff() %>% diff(lag=12) %>% acf() %>% plot(main= 'ACF')  
+# Draw PACF model with d=1, D=1
+train.ts %>% diff() %>% diff(lag=12) %>% pacf() %>% plot(main= 'PACF')
+
+# Observed trend and seasonality from the decomposition model and figure out the parameters for ARIMA model
+# Model trial 1:
+fit1 <- Arima(train.ts, order=c(0,1,0), seasonal=c(0,1,0))  
+acf(fit1$residuals, lag.max=24,main='ARIMA(0,1,0)(0,1,0)[12] ACF')  
+pacf(fit1$residuals,lag.max=24, main='ARIMA(0,1,0)(0,1,0)[12] PACF')
+# Choose MA since it has less significant time lags. Set q and Q as 1 and assign to fit2 model
+
+# Model trial 2:
+fit2 <- Arima(train.ts, order=c(0,1,1), seasonal=c(0,1,1))
+acf(fit2$residuals, lag.max=24,main='ARIMA(0,1,1)(0,1,1)[12] ACF')
+pacf(fit2$residuals,lag.max=24, main='ARIMA(0,1,1)(0,1,1)[12] PACF')
+# By observing the ACF and PACF, there isn't much significance in the model now.
+# The ARIMA model is good to go.
+
+# Choose Model 2 and predict the next 12 month sales
+fit2.pred <- forecast(fit2, h = 12, level = 0)
+plot(fit2.pred, main = 'Brie ARIMA final model', xlab = 'Year', ylab = 'Sales(in Kilograms)')
+lines(fit2$fitted, col = 2)
+lines(valid.ts, lty = 2)
+
+## C. Auto.ARIMA
+brie.auto <- auto.arima(train.ts)
+auto.pred <- forecast(brie.auto, h = 12, level = 0)
+plot(auto.pred, main = 'Brie auto ARIMA final model', xlab = 'Year', ylab = 'Sales(in Kilograms)')
+lines(auto.pred$fitted, lwd = 1, col = 2)
+lines(valid.ts, lty = 2)
+
+## D. Holt-Winters Validation
+# use ets() with option model = "ZZZ" to fit Holt-Winter's smoothing with the automatic chosen parameters
+# with additive error, trend, seasonality, and default paramenters 
+
+hwin <- ets(train.ts, model = "ZZZ")
+hwin.pred <- forecast(hwin, h = 12, level = 0) 
+plot(hwin.pred,  main = 'Brie AES Validation', xlab = 'Year', ylab = 'Sales(in Kilograms)')
+lines(hwin.pred$fitted, lwd = 1, col = 2)
+lines(valid.ts, lty = 2)
+
+## Create ACF and PACF plots for the residuals of each model and determine which model is preferable
+## A. Decomposition
+acf(valid.pred$residuals,lag.max=24, main='Brie Decomposition ACF')
+pacf(valid.pred$residuals,lag.max=24, main='Brie Decomposition PACF')
+
+## B. ARIMA
+acf(fit2$residuals, lag.max=24,main='ARIMA(0,1,1)(0,1,1)[12] ACF')
+pacf(fit2$residuals,lag.max=24, main='ARIMA(0,1,1)(0,1,1)[12] PACF')
+
+## C. Auto.ARIMA
+acf(auto.pred$residuals, lag.max=24, main='Auto.ARIMA ACF')
+pacf(auto.pred$residuals, lag.max=24, main='Auto.ARIMA PACF')
+
+## D. Holt-Winters Validation
+acf(hwin.pred$residuals, lag.max = 24, main='Holt-Winters ACF')
+pacf(hwin.pred$residuals, lag.max = 24, main='Holt-Winters PACF')
+
+## Generate validation accuracies (RMSE) for each of the models and determine which model is preferable
+## A. Decomposition
+accuracy(valid.pred, valid.ts)
+accuracy(valid.pred$mean, valid.ts)
+
+## B. ARIMA: 
+accuracy(fit2.pred, valid.ts)
+
+## C. Auto.ARIMA
+accuracy(auto.pred, valid.ts)
+
+## D. Holt-Winters Validation
+accuracy(hwin.pred, valid.ts)
+
+## Result: ARIMA model’s test set has the least RMSE compared to other models. We may prefer this model over others.
+
+## Use all data to update the preferable model by RMSE and generate forecast for the next 6 months
+final <- Arima(brie.ts, order=c(0,1,1), seasonal=c(0,1,1))
+final.pred <- forecast(final, h = 6, level = 0)
+plot(final.pred, main = 'ARIMA Forecast for the next 6 months', xlab = 'Year', ylab = 'Sales(in Kilograms)')
+lines(final$fitted, lwd = 1, col = 2)
+final.pred
+
+## Create a plot to show the sales data, the model fit, and forecast
+plot(fit2.pred, main = 'Next 6 months forecast for ARIMA model', xlab = 'Year', ylab = 'Sales(in Kilograms)')
+lines(fit2$fitted, col = 2)
